@@ -920,6 +920,10 @@ function GitScreen() {
   const [branches, setBranches] = useState([]);             // { name, current, remote }
   const [newBranchName, setNewBranchName] = useState('');
   const [checkoutNew, setCheckoutNew] = useState(true);
+  const [stashes, setStashes] = useState([]);
+  const [lastCommit, setLastCommit] = useState(null);
+  const [credHelperLocal, setCredHelperLocal] = useState('');
+  const [credHelperGlobal, setCredHelperGlobal] = useState('');
 
   // ── helpers ────────────────────────────────────────────────────────
   function clearActionResult() { setActionResult(null); }
@@ -981,11 +985,55 @@ function GitScreen() {
       // All branches
       const branchListOut = await gitExec(['branch', '-a'], cwd);
       setBranches(parseBranches(branchListOut));
+
+      // Stashes
+      try {
+        const stashListOut = await gitExec(['stash', 'list'], cwd);
+        setStashes(stashListOut.split('\n').filter(l => l.trim().length > 0));
+      } catch {
+        setStashes([]);
+      }
+
+      // Last commit
+      try {
+        const logOut = await gitExec(['log', '-1', '--format=%H%n%s%n%cI%n%cr'], cwd);
+        const parts = logOut.trim().split('\n');
+        if (parts.length >= 3) {
+          setLastCommit({
+            hash: parts[0],
+            message: parts[1],
+            date: parts[2],
+            relativeDate: parts[3] || ''
+          });
+        } else {
+          setLastCommit(null);
+        }
+      } catch {
+        setLastCommit(null);
+      }
+
+      // Credential helpers
+      try {
+        const localVal = await gitExec(['config', '--local', '--get', 'credential.helper'], cwd);
+        setCredHelperLocal(localVal.trim());
+      } catch {
+        setCredHelperLocal('');
+      }
+      try {
+        const globalVal = await gitExec(['config', '--global', '--get', 'credential.helper'], cwd);
+        setCredHelperGlobal(globalVal.trim());
+      } catch {
+        setCredHelperGlobal('');
+      }
     } catch (err) {
       setError(err.toString());
       setBranch(null);
       setGitStatus(null);
       setFiles([]);
+      setStashes([]);
+      setLastCommit(null);
+      setCredHelperLocal('');
+      setCredHelperGlobal('');
     } finally {
       setLoading(false);
     }
@@ -1006,6 +1054,10 @@ function GitScreen() {
         setActionResult(null);
         setCommitMsg('');
         setNewBranchName('');
+        setStashes([]);
+        setLastCommit(null);
+        setCredHelperLocal('');
+        setCredHelperGlobal('');
         await runGitCommands(selected);
       }
     } catch (err) {
@@ -1039,6 +1091,60 @@ function GitScreen() {
       await gitExec(['checkout', name], dirPath);
       await runGitCommands(dirPath);
       setActionResult({ type: 'success', text: `Switched to branch '${name}'.` });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  // ── stash management ───────────────────────────────────────────────
+  async function doStash() {
+    try {
+      setActionLoading('Stashing changes');
+      await gitExec(['stash'], dirPath);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: 'All changes stashed.' });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  async function doStashUnstaged() {
+    try {
+      setActionLoading('Stashing unstaged changes');
+      await gitExec(['stash', '--keep-index'], dirPath);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: 'Unstaged changes stashed (staged changes kept).' });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  async function doStashPop() {
+    try {
+      setActionLoading('Popping last stash');
+      const out = await gitExec(['stash', 'pop'], dirPath);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: out || 'Stash popped successfully.' });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  // ── credentials configuration ──────────────────────────────────────
+  async function updateCredentialHelper(scope, value) {
+    try {
+      setActionLoading(`Updating credential helper (${scope})`);
+      if (!value) {
+        try {
+          await gitExec(['config', scope === 'global' ? '--global' : '--local', '--unset', 'credential.helper'], dirPath);
+        } catch {
+          // Ignore error if it wasn't set
+        }
+      } else {
+        await gitExec(['config', scope === 'global' ? '--global' : '--local', 'credential.helper', value], dirPath);
+      }
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: `Credential helper updated successfully for ${scope} scope.` });
     } catch (err) {
       setActionResult({ type: 'danger', text: err.toString() });
     } finally { setActionLoading(null); }
@@ -1192,6 +1298,16 @@ function GitScreen() {
         ? html`<span class="badge ${branchBadgeClass} ms-auto px-3 py-2">🌿 ${branch}</span>`
         : ''}
           </div>
+          ${lastCommit ? html`
+            <div class="card-body py-2 border-top bg-light">
+              <div class="d-flex align-items-center gap-2 text-muted small flex-wrap">
+                <strong>Last Commit:</strong>
+                <span class="badge bg-secondary font-monospace">${lastCommit.hash.substring(0, 7)}</span>
+                <span class="text-dark text-truncate" style="max-width: 60%;" title=${lastCommit.message}>${lastCommit.message}</span>
+                <span class="ms-auto text-end text-muted small" title="${lastCommit.relativeDate}">${new Date(lastCommit.date).toLocaleString()}</span>
+              </div>
+            </div>
+          ` : ''}
         </div>
 
         <!-- Branches card -->
@@ -1261,14 +1377,60 @@ function GitScreen() {
           ` : ''}
         </div>
 
+        <!-- Credentials helper card -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header bg-light">
+            <strong>Git Credentials Helper</strong>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Configure Git's credential helper to securely store your repository credentials (username/password/token) so you don't have to enter them every time.
+            </p>
+            <div class="row g-3">
+              <!-- Local Setting -->
+              <div class="col-md-6">
+                <label class="form-label small fw-semibold">Local (This Repository):</label>
+                <select class="form-select form-select-sm" value=${credHelperLocal} 
+                        onchange=${(e) => updateCredentialHelper('local', e.target.value)} disabled=${busy}>
+                  <option value="">(None - use global / prompt)</option>
+                  <option value="manager">Git Credential Manager (manager)</option>
+                  <option value="store">Store plain-text in file (store)</option>
+                  <option value="cache">Cache in memory temporarily (cache)</option>
+                  ${credHelperLocal && !['manager', 'store', 'cache'].includes(credHelperLocal) ? html`
+                    <option value=${credHelperLocal}>Custom: ${credHelperLocal}</option>
+                  ` : ''}
+                </select>
+                <div class="form-text small">Stored in repository's <code>.git/config</code></div>
+              </div>
+              <!-- Global Setting -->
+              <div class="col-md-6">
+                <label class="form-label small fw-semibold">Global (All Repositories):</label>
+                <select class="form-select form-select-sm" value=${credHelperGlobal} 
+                        onchange=${(e) => updateCredentialHelper('global', e.target.value)} disabled=${busy}>
+                  <option value="">(None - prompt every time)</option>
+                  <option value="manager">Git Credential Manager (manager)</option>
+                  <option value="store">Store plain-text in file (store)</option>
+                  <option value="cache">Cache in memory temporarily (cache)</option>
+                  ${credHelperGlobal && !['manager', 'store', 'cache'].includes(credHelperGlobal) ? html`
+                    <option value=${credHelperGlobal}>Custom: ${credHelperGlobal}</option>
+                  ` : ''}
+                </select>
+                <div class="form-text small">Stored in global user config (e.g. <code>~/.gitconfig</code>)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Files card: staged vs unstaged -->
         ${files.length > 0 ? html`
           <div class="card shadow-sm mb-3">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
               <strong>Changed Files (${files.length})</strong>
-              <div class="d-flex gap-2">
+              <div class="d-flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-outline-success" onclick=${stageAll} disabled=${busy || unstagedFiles.length === 0}>Stage All</button>
                 <button class="btn btn-sm btn-outline-warning" onclick=${unstageAll} disabled=${busy || stagedFiles.length === 0}>Unstage All</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick=${doStash} disabled=${busy} title="Stash all changes (staged and unstaged)">Stash All</button>
+                <button class="btn btn-sm btn-outline-dark" onclick=${doStashUnstaged} disabled=${busy || unstagedFiles.length === 0} title="Stash unstaged changes only">Stash Unstaged</button>
               </div>
             </div>
 
@@ -1303,6 +1465,25 @@ function GitScreen() {
                 `)}
               </ul>
             ` : ''}
+          </div>
+        ` : ''}
+
+        <!-- Stashes card (if any stashes exist) -->
+        ${stashes.length > 0 ? html`
+          <div class="card shadow-sm mb-3">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+              <strong>Stashes (${stashes.length})</strong>
+              <button class="btn btn-sm btn-outline-danger" onclick=${doStashPop} disabled=${busy}>
+                Pop Last Stash
+              </button>
+            </div>
+            <ul class="list-group list-group-flush" style="max-height:150px;overflow:auto;">
+              ${stashes.map((s, idx) => html`
+                <li class="list-group-item py-1 font-monospace small" key=${idx}>
+                  ${s}
+                </li>
+              `)}
+            </ul>
           </div>
         ` : ''}
 
@@ -2067,6 +2248,16 @@ function LLMScreen({ provider: initialProvider }) {
 function App() {
   const [route, navigate] = useHashRoute();
   const [count, setCount] = useState(0);
+  const [visited, setVisited] = useState({ git: false, dirwatcher: false, ffmpeg: false });
+
+  useEffect(() => {
+    if (['git', 'dirwatcher', 'ffmpeg'].includes(route.name)) {
+      setVisited((prev) => {
+        if (prev[route.name]) return prev;
+        return { ...prev, [route.name]: true };
+      });
+    }
+  }, [route.name]);
 
   useEffect(() => {
     const handler = (event) => {
@@ -2117,11 +2308,11 @@ function App() {
     `,
     database: () => html`<${DatabaseScreen} />`,
     textfile: () => html`<${TextFileScreen} />`,
-    ffmpeg: () => html`<${FFmpegScreen} />`,
+    ffmpeg: () => null,
     ejs: () => html`<${EJSScreen} />`,
-    dirwatcher: () => html`<${DirectoryWatcherScreen} />`,
+    dirwatcher: () => null,
     http: () => html`<${HttpScreen} />`,
-    git: () => html`<${GitScreen} />`,
+    git: () => null,
     ollama: () => html`<${OllamaScreen} />`,
     lmstudio: () => html`<${LLMScreen} provider="lmstudio" />`,
     'api-keys': () => html`<${ApiKeysScreen} />`,
@@ -2195,6 +2386,21 @@ function App() {
 
       <main class="container-fluid">
         <div class="container">
+          ${visited.ffmpeg ? html`
+            <div style=${route.name === 'ffmpeg' ? '' : 'display: none;'}>
+              <${FFmpegScreen} />
+            </div>
+          ` : ''}
+          ${visited.dirwatcher ? html`
+            <div style=${route.name === 'dirwatcher' ? '' : 'display: none;'}>
+              <${DirectoryWatcherScreen} />
+            </div>
+          ` : ''}
+          ${visited.git ? html`
+            <div style=${route.name === 'git' ? '' : 'display: none;'}>
+              <${GitScreen} />
+            </div>
+          ` : ''}
           ${routeBody}
         </div>
         <div id="image" class="min-vh-50">
