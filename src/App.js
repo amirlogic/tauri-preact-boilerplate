@@ -1377,50 +1377,6 @@ function GitScreen() {
           ` : ''}
         </div>
 
-        <!-- Credentials helper card -->
-        <div class="card shadow-sm mb-3">
-          <div class="card-header bg-light">
-            <strong>Git Credentials Helper</strong>
-          </div>
-          <div class="card-body">
-            <p class="text-muted small mb-3">
-              Configure Git's credential helper to securely store your repository credentials (username/password/token) so you don't have to enter them every time.
-            </p>
-            <div class="row g-3">
-              <!-- Local Setting -->
-              <div class="col-md-6">
-                <label class="form-label small fw-semibold">Local (This Repository):</label>
-                <select class="form-select form-select-sm" value=${credHelperLocal} 
-                        onchange=${(e) => updateCredentialHelper('local', e.target.value)} disabled=${busy}>
-                  <option value="">(None - use global / prompt)</option>
-                  <option value="manager">Git Credential Manager (manager)</option>
-                  <option value="store">Store plain-text in file (store)</option>
-                  <option value="cache">Cache in memory temporarily (cache)</option>
-                  ${credHelperLocal && !['manager', 'store', 'cache'].includes(credHelperLocal) ? html`
-                    <option value=${credHelperLocal}>Custom: ${credHelperLocal}</option>
-                  ` : ''}
-                </select>
-                <div class="form-text small">Stored in repository's <code>.git/config</code></div>
-              </div>
-              <!-- Global Setting -->
-              <div class="col-md-6">
-                <label class="form-label small fw-semibold">Global (All Repositories):</label>
-                <select class="form-select form-select-sm" value=${credHelperGlobal} 
-                        onchange=${(e) => updateCredentialHelper('global', e.target.value)} disabled=${busy}>
-                  <option value="">(None - prompt every time)</option>
-                  <option value="manager">Git Credential Manager (manager)</option>
-                  <option value="store">Store plain-text in file (store)</option>
-                  <option value="cache">Cache in memory temporarily (cache)</option>
-                  ${credHelperGlobal && !['manager', 'store', 'cache'].includes(credHelperGlobal) ? html`
-                    <option value=${credHelperGlobal}>Custom: ${credHelperGlobal}</option>
-                  ` : ''}
-                </select>
-                <div class="form-text small">Stored in global user config (e.g. <code>~/.gitconfig</code>)</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Files card: staged vs unstaged -->
         ${files.length > 0 ? html`
           <div class="card shadow-sm mb-3">
@@ -1430,7 +1386,7 @@ function GitScreen() {
                 <button class="btn btn-sm btn-outline-success" onclick=${stageAll} disabled=${busy || unstagedFiles.length === 0}>Stage All</button>
                 <button class="btn btn-sm btn-outline-warning" onclick=${unstageAll} disabled=${busy || stagedFiles.length === 0}>Unstage All</button>
                 <button class="btn btn-sm btn-outline-secondary" onclick=${doStash} disabled=${busy} title="Stash all changes (staged and unstaged)">Stash All</button>
-                <button class="btn btn-sm btn-outline-dark" onclick=${doStashUnstaged} disabled=${busy || unstagedFiles.length === 0} title="Stash unstaged changes only">Stash Unstaged</button>
+                <button class="btn btn-sm btn-outline-dark" onclick=${doStashUnstaged} disabled=${busy || unstagedFiles.length === 0} title="Stash unstaged changes only">Stash</button>
               </div>
             </div>
 
@@ -1512,6 +1468,50 @@ function GitScreen() {
         ? html`<pre class="bg-dark text-light p-3 m-0 rounded-bottom" style="max-height:300px;overflow:auto;font-size:0.85rem;">${gitStatus}</pre>`
         : html`<p class="text-muted p-3 m-0">—</p>`
       }
+          </div>
+        </div>
+
+        <!-- Credentials helper card -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header bg-light">
+            <strong>Git Credentials Helper</strong>
+          </div>
+          <div class="card-body">
+            <p class="text-muted small mb-3">
+              Configure Git's credential helper to securely store your repository credentials (username/password/token) so you don't have to enter them every time.
+            </p>
+            <div class="row g-3">
+              <!-- Local Setting -->
+              <div class="col-md-6">
+                <label class="form-label small fw-semibold">Local (This Repository):</label>
+                <select class="form-select form-select-sm" value=${credHelperLocal} 
+                        onchange=${(e) => updateCredentialHelper('local', e.target.value)} disabled=${busy}>
+                  <option value="">(None - use global / prompt)</option>
+                  <option value="manager">Git Credential Manager (manager)</option>
+                  <option value="store">Store plain-text in file (store)</option>
+                  <option value="cache">Cache in memory temporarily (cache)</option>
+                  ${credHelperLocal && !['manager', 'store', 'cache'].includes(credHelperLocal) ? html`
+                    <option value=${credHelperLocal}>Custom: ${credHelperLocal}</option>
+                  ` : ''}
+                </select>
+                <div class="form-text small">Stored in repository's <code>.git/config</code></div>
+              </div>
+              <!-- Global Setting -->
+              <div class="col-md-6">
+                <label class="form-label small fw-semibold">Global (All Repositories):</label>
+                <select class="form-select form-select-sm" value=${credHelperGlobal} 
+                        onchange=${(e) => updateCredentialHelper('global', e.target.value)} disabled=${busy}>
+                  <option value="">(None - prompt every time)</option>
+                  <option value="manager">Git Credential Manager (manager)</option>
+                  <option value="store">Store plain-text in file (store)</option>
+                  <option value="cache">Cache in memory temporarily (cache)</option>
+                  ${credHelperGlobal && !['manager', 'store', 'cache'].includes(credHelperGlobal) ? html`
+                    <option value=${credHelperGlobal}>Custom: ${credHelperGlobal}</option>
+                  ` : ''}
+                </select>
+                <div class="form-text small">Stored in global user config (e.g. <code>~/.gitconfig</code>)</div>
+              </div>
+            </div>
           </div>
         </div>
       ` : html`<p class="text-muted">No folder selected.</p>`}
