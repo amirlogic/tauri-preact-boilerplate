@@ -53,6 +53,7 @@ Also for SQLite: `cargo add tauri-plugin-sql --features sqlite`
 
 For the watch function, it is optionnal and had to be activated in cargo.toml
 
+
 ### Icons
 
 `pnpm tauri icon path\to\source\icon.svg`
