@@ -937,18 +937,54 @@ function GitScreen() {
     return res.stdout;
   }
 
-  // Parse "git status --porcelain" into structured file entries
+  function decodeGitPath(value) {
+    if (!value) return value;
+    let result = '';
+    for (let i = 0; i < value.length; i++) {
+      const ch = value[i];
+      if (ch === '\\' && i + 1 < value.length) {
+        const next = value[i + 1];
+        if (next === 'n') {
+          result += '\n';
+          i += 1;
+          continue;
+        }
+        if (next === 't') {
+          result += '\t';
+          i += 1;
+          continue;
+        }
+        if (next === '"') {
+          result += '"';
+          i += 1;
+          continue;
+        }
+        if (next === '\\') {
+          result += '\\';
+          i += 1;
+          continue;
+        }
+      }
+      if (ch === '"' && i > 0 && value[i - 1] !== '\\') {
+        continue;
+      }
+      result += ch;
+    }
+    return result.replace(/^"|"$/g, '');
+  }
+
+  // Parse "git status --porcelain -z" into structured file entries
   function parsePorcelain(raw) {
-    return raw
-      .split('\n')
-      .filter(l => l.length >= 4)
-      .map(line => {
-        const x = line[0]; // index (staging area) status
-        const y = line[1]; // work-tree status
-        const filePath = line.substring(3);
-        const staged = (x !== ' ' && x !== '?');
-        return { code: `${x}${y}`, staged, path: filePath };
-      });
+    if (!raw) return [];
+
+    const records = raw.split('\0').filter(Boolean);
+    return records.map(record => {
+      const x = record[0];
+      const y = record[1];
+      const path = decodeGitPath(record.substring(3).replace(/^\s+/, ''));
+      const staged = (x !== ' ' && x !== '?');
+      return { code: `${x}${y}`, staged, path };
+    }).filter(entry => entry.path);
   }
 
   // Parse "git branch -a" into structured branch entries
@@ -978,8 +1014,8 @@ function GitScreen() {
       const statusOut = await gitExec(['status'], cwd);
       setGitStatus(statusOut);
 
-      // Porcelain status (machine-readable)
-      const porcelainOut = await gitExec(['status', '--porcelain'], cwd);
+      // Porcelain status (machine-readable, null-delimited for paths with spaces/special chars)
+      const porcelainOut = await gitExec(['status', '--porcelain', '-z'], cwd);
       setFiles(parsePorcelain(porcelainOut));
 
       // All branches
