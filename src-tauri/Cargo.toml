@@ -1,6 +1,6 @@
 [package]
 name = "tauriboilerplate"
-version = "0.1.1"
+version = "0.1.5"
 description = "tauriboilerplate"
 authors = ["Amir Hachaichi"]
 edition = "2021"
