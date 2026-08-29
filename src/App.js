@@ -1065,6 +1065,50 @@ function GitScreen() {
     }
   }
 
+  useEffect(() => {
+    let unlisten;
+    let active = true;
+
+    async function setupWatcher() {
+      if (!dirPath) return;
+
+      try {
+        const { watch } = window.__TAURI__.fs || {};
+        if (!watch) return;
+
+        const unsubscribe = await watch(dirPath, (event) => {
+          console.log('Git watch event received:', event);
+          if (!active || !dirPath) return;
+
+          setTimeout(() => {
+            if (active && dirPath) {
+              runGitCommands(dirPath).catch((err) => {
+                console.error('Auto-refresh failed:', err);
+              });
+            }
+          }, 200);
+        }, { recursive: true });
+
+        if (active) {
+          unlisten = unsubscribe;
+        } else {
+          unsubscribe();
+        }
+      } catch (err) {
+        console.error('Git watcher error:', err);
+      }
+    }
+
+    setupWatcher();
+
+    return () => {
+      active = false;
+      if (typeof unlisten === 'function') {
+        unlisten();
+      }
+    };
+  }, [dirPath]);
+
   // ── branch management ──────────────────────────────────────────────
   async function doCreateBranch() {
     const name = newBranchName.trim();
@@ -2247,7 +2291,6 @@ function LLMScreen({ provider: initialProvider }) {
 
 function App() {
   const [route, navigate] = useHashRoute();
-  const [count, setCount] = useState(0);
   const [visited, setVisited] = useState({ git: false, dirwatcher: false, ffmpeg: false });
 
   useEffect(() => {
@@ -2261,9 +2304,7 @@ function App() {
 
   useEffect(() => {
     const handler = (event) => {
-      if (event?.detail === 'increment-counter') {
-        setCount((c) => c + 1);
-      } else if (event?.detail?.startsWith('navigate-')) {
+      if (event?.detail?.startsWith('navigate-')) {
         const targetRoute = event.detail.replace('navigate-', '');
         navigate(targetRoute);
       }
@@ -2276,15 +2317,8 @@ function App() {
   const routeMap = {
     home: () => html`
       <div class="text-center mt-5">
-        <h1>Home Page</h1>
-        <p>Welcome to the Preact Demo with Routing!</p>
-        <div class="mt-4">
-          <h3>Counter Example</h3>
-          <p>Count: ${count}</p>
-          <button class="btn btn-primary" onclick=${() => setCount(count + 1)}>
-            Increment
-          </button>
-        </div>
+        <h1>🛠️</h1>
+        <h2>Welcome to Tauri Multifunction App!</h2>
       </div>
     `,
     about: () => html`
@@ -2343,12 +2377,6 @@ function App() {
           
           <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav me-auto">
-    
-              <li class="nav-item">
-                <a class="nav-link ${route.name === 'database' ? 'active fw-bold' : ''}" 
-                   href="#" onclick=${(e) => { e.preventDefault(); navigate('database'); }}>Database</a>
-              </li>
-              
               <li class="nav-item">
                 <a class="nav-link ${route.name === 'ffmpeg' ? 'active fw-bold' : ''}" 
                    href="#" onclick=${(e) => { e.preventDefault(); navigate('ffmpeg'); }}>FFMPEG</a>
