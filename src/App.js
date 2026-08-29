@@ -1080,6 +1080,17 @@ function GitScreen() {
           console.log('Git watch event received:', event);
           if (!active || !dirPath) return;
 
+          const changedPaths = Array.isArray(event?.paths) ? event.paths : [];
+          const shouldRefresh = changedPaths.every((p) => {
+            const normalized = String(p).replace(/\\/g, '/');
+            return !normalized.includes('/.git/') && !normalized.endsWith('/.git') && !normalized.includes('\\.git\\') && !normalized.endsWith('\\.git');
+          });
+
+          if (!shouldRefresh) {
+            console.log('Skipping Git refresh for .git metadata change');
+            return;
+          }
+
           setTimeout(() => {
             if (active && dirPath) {
               runGitCommands(dirPath).catch((err) => {
