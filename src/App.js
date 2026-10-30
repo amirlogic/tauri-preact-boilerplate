@@ -924,6 +924,7 @@ function GitScreen() {
   const [lastCommit, setLastCommit] = useState(null);
   const [credHelperLocal, setCredHelperLocal] = useState('');
   const [credHelperGlobal, setCredHelperGlobal] = useState('');
+  const [diffStats, setDiffStats] = useState({});    // { [path]: { added: number, removed: number } }
 
   // ── helpers ────────────────────────────────────────────────────────
   function clearActionResult() { setActionResult(null); }
@@ -973,6 +974,24 @@ function GitScreen() {
     return result.replace(/^"|"$/g, '');
   }
 
+  // Parse "git diff --numstat" output into a stats map { [path]: { added, removed } }
+  function parseNumstat(raw, existing) {
+    const stats = { ...existing };
+    if (!raw) return stats;
+    raw.split('\n').forEach(line => {
+      const parts = line.trim().split('\t');
+      if (parts.length >= 3) {
+        const added = parseInt(parts[0], 10) || 0;
+        const removed = parseInt(parts[1], 10) || 0;
+        const path = parts[2].trim();
+        if (path) {
+          stats[path] = { added, removed };
+        }
+      }
+    });
+    return stats;
+  }
+
   // Parse "git status --porcelain -z" into structured file entries
   function parsePorcelain(raw) {
     if (!raw) return [];
@@ -1017,6 +1036,18 @@ function GitScreen() {
       // Porcelain status (machine-readable, null-delimited for paths with spaces/special chars)
       const porcelainOut = await gitExec(['status', '--porcelain', '-z'], cwd);
       setFiles(parsePorcelain(porcelainOut));
+
+      // Diff stats: lines added/removed per file (unstaged + staged)
+      let stats = {};
+      try {
+        const unstagedNumstat = await gitExec(['diff', '--numstat'], cwd);
+        stats = parseNumstat(unstagedNumstat, stats);
+      } catch { /* no unstaged diff */ }
+      try {
+        const stagedNumstat = await gitExec(['diff', '--cached', '--numstat'], cwd);
+        stats = parseNumstat(stagedNumstat, stats);
+      } catch { /* no staged diff */ }
+      setDiffStats(stats);
 
       // All branches
       const branchListOut = await gitExec(['branch', '-a'], cwd);
@@ -1070,6 +1101,7 @@ function GitScreen() {
       setLastCommit(null);
       setCredHelperLocal('');
       setCredHelperGlobal('');
+      setDiffStats({});
     } finally {
       setLoading(false);
     }
@@ -1094,6 +1126,7 @@ function GitScreen() {
         setLastCommit(null);
         setCredHelperLocal('');
         setCredHelperGlobal('');
+        setDiffStats({});
         await runGitCommands(selected);
       }
     } catch (err) {
@@ -1483,33 +1516,43 @@ function GitScreen() {
 
             <!-- Staged section -->
             ${stagedFiles.length > 0 ? html`
-              <div class="px-3 pt-3 pb-1"><h6 class="text-success mb-1">✅ Staged</h6></div>
+              <div class="px-3 pt-2 pb-1"><h6 class="text-success mb-1" style="font-size:0.78rem;letter-spacing:0.04em;text-transform:uppercase;font-weight:700;">✅ Staged</h6></div>
               <ul class="list-group list-group-flush">
-                ${stagedFiles.map(f => html`
-                  <li class="list-group-item d-flex justify-content-between align-items-center py-1" key=${'s-' + f.path}>
-                    <div class="d-flex align-items-center gap-2 text-truncate">
-                      <span class="badge ${codeBadge(f.code)} font-monospace" style="min-width:2rem;text-align:center;">${f.code}</span>
-                      <span class="text-truncate" title=${f.path}>${f.path}</span>
+                ${stagedFiles.map(f => {
+                  const ds = diffStats[f.path];
+                  return html`
+                  <li class="list-group-item d-flex justify-content-between align-items-center" style="padding:0.3rem 0.75rem;" key=${'s-' + f.path}>
+                    <div class="d-flex align-items-center gap-2 text-truncate flex-grow-1" style="min-width:0;">
+                      <span class="badge ${codeBadge(f.code)} font-monospace" style="min-width:2rem;text-align:center;font-size:0.7rem;">${f.code}</span>
+                      <span class="text-truncate font-monospace" title=${f.path} style="font-size:0.8rem;">${f.path}</span>
                     </div>
-                    <button class="btn btn-sm btn-outline-warning" onclick=${() => unstageFile(f.path)} disabled=${busy}>Unstage</button>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                      ${ds ? html`<span style="font-size:0.72rem;font-family:monospace;white-space:nowrap;"><span style="color:#198754;">+${ds.added}</span><span class="text-muted mx-1">/</span><span style="color:#dc3545;">-${ds.removed}</span></span>` : ''}
+                      <button class="btn btn-sm btn-outline-warning" style="font-size:0.75rem;padding:0.15rem 0.5rem;" onclick=${() => unstageFile(f.path)} disabled=${busy}>Unstage</button>
+                    </div>
                   </li>
-                `)}
+                `})}
               </ul>
             ` : ''}
 
             <!-- Unstaged section -->
             ${unstagedFiles.length > 0 ? html`
-              <div class="px-3 pt-3 pb-1"><h6 class="text-danger mb-1">📝 Unstaged / Untracked</h6></div>
+              <div class="px-3 pt-2 pb-1"><h6 class="text-danger mb-1" style="font-size:0.78rem;letter-spacing:0.04em;text-transform:uppercase;font-weight:700;">📝 Unstaged / Untracked</h6></div>
               <ul class="list-group list-group-flush">
-                ${unstagedFiles.map(f => html`
-                  <li class="list-group-item d-flex justify-content-between align-items-center py-1" key=${'u-' + f.path}>
-                    <div class="d-flex align-items-center gap-2 text-truncate">
-                      <span class="badge ${codeBadge(f.code)} font-monospace" style="min-width:2rem;text-align:center;">${f.code}</span>
-                      <span class="text-truncate" title=${f.path}>${f.path}</span>
+                ${unstagedFiles.map(f => {
+                  const ds = diffStats[f.path];
+                  return html`
+                  <li class="list-group-item d-flex justify-content-between align-items-center" style="padding:0.3rem 0.75rem;" key=${'u-' + f.path}>
+                    <div class="d-flex align-items-center gap-2 text-truncate flex-grow-1" style="min-width:0;">
+                      <span class="badge ${codeBadge(f.code)} font-monospace" style="min-width:2rem;text-align:center;font-size:0.7rem;">${f.code}</span>
+                      <span class="text-truncate font-monospace" title=${f.path} style="font-size:0.8rem;">${f.path}</span>
                     </div>
-                    <button class="btn btn-sm btn-outline-success" onclick=${() => stageFile(f.path)} disabled=${busy}>Stage</button>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                      ${ds ? html`<span style="font-size:0.72rem;font-family:monospace;white-space:nowrap;"><span style="color:#198754;">+${ds.added}</span><span class="text-muted mx-1">/</span><span style="color:#dc3545;">-${ds.removed}</span></span>` : ''}
+                      <button class="btn btn-sm btn-outline-success" style="font-size:0.75rem;padding:0.15rem 0.5rem;" onclick=${() => stageFile(f.path)} disabled=${busy}>Stage</button>
+                    </div>
                   </li>
-                `)}
+                `})}
               </ul>
             ` : ''}
           </div>
