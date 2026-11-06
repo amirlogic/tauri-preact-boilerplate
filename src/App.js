@@ -929,6 +929,9 @@ function GitScreen() {
   const [newRemoteName, setNewRemoteName] = useState('');
   const [newRemoteUrl, setNewRemoteUrl] = useState('');
   const [editingRemote, setEditingRemote] = useState(null);
+  const [selectedDiff, setSelectedDiff] = useState(null);
+  const [diffText, setDiffText] = useState('');
+  const [diffLoading, setDiffLoading] = useState(false);
   const refreshInProgress = useRef(false);
 
   // ── helpers ────────────────────────────────────────────────────────
@@ -1007,7 +1010,7 @@ function GitScreen() {
       const y = record[1];
       const path = decodeGitPath(record.substring(3).replace(/^\s+/, ''));
       const staged = (x !== ' ' && x !== '?');
-      return { code: `${x}${y}`, staged, path };
+      return { code: `${x}${y}`, staged, unstaged: y !== ' ' || (x === '?' && y === '?'), path };
     }).filter(entry => entry.path);
   }
 
@@ -1150,6 +1153,8 @@ function GitScreen() {
         setNewRemoteName('');
         setNewRemoteUrl('');
         setEditingRemote(null);
+        setSelectedDiff(null);
+        setDiffText('');
         await runGitCommands(selected);
       }
     } catch (err) {
@@ -1356,6 +1361,36 @@ function GitScreen() {
     } finally { setActionLoading(null); }
   }
 
+  async function showFileDiff(file, staged) {
+    const selection = { path: file.path, staged };
+    if (selectedDiff?.path === selection.path && selectedDiff.staged === staged) {
+      setSelectedDiff(null);
+      setDiffText('');
+      return;
+    }
+
+    setSelectedDiff(selection);
+    setDiffText('');
+    setDiffLoading(true);
+    try {
+      const { Command } = window.__TAURI__.shell || {};
+      if (!Command) throw new Error('Shell plugin not available');
+      const args = file.code === '??' && !staged
+        ? ['diff', '--no-index', '--no-ext-diff', '--unified=3', '--', '/dev/null', file.path]
+        : ['diff', '--no-ext-diff', '--unified=3', ...(staged ? ['--cached'] : []), '--', file.path];
+      const command = await Command.create('git', args, { cwd: dirPath });
+      const result = await command.execute();
+      if (result.code !== 0 && result.code !== 1) {
+        throw new Error(result.stderr || `git diff failed for ${file.path}`);
+      }
+      setDiffText(result.stdout || 'No textual diff available.');
+    } catch (err) {
+      setDiffText(`Unable to load diff: ${err.toString()}`);
+    } finally {
+      setDiffLoading(false);
+    }
+  }
+
   // ── commit ─────────────────────────────────────────────────────────
   async function doCommit() {
     const msg = commitMsg.trim();
@@ -1400,7 +1435,7 @@ function GitScreen() {
     : 'bg-secondary';
 
   const stagedFiles = files.filter(f => f.staged);
-  const unstagedFiles = files.filter(f => !f.staged);
+  const unstagedFiles = files.filter(f => f.unstaged || !f.staged);
   const hasStagedFiles = stagedFiles.length > 0;
   const busy = loading || actionLoading !== null;
 
@@ -1572,6 +1607,10 @@ function GitScreen() {
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
                       ${ds ? html`<span style="font-size:0.72rem;font-family:monospace;white-space:nowrap;"><span style="color:#198754;">+${ds.added}</span><span class="text-muted mx-1">/</span><span style="color:#dc3545;">-${ds.removed}</span></span>` : ''}
+                      <button class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;padding:0.15rem 0.5rem;"
+                              onclick=${() => showFileDiff(f, true)} disabled=${busy || diffLoading}>
+                        ${selectedDiff?.path === f.path && selectedDiff.staged ? 'Hide Diff' : 'Diff'}
+                      </button>
                       <button class="btn btn-sm btn-outline-warning" style="font-size:0.75rem;padding:0.15rem 0.5rem;" onclick=${() => unstageFile(f.path)} disabled=${busy}>Unstage</button>
                     </div>
                   </li>
@@ -1593,12 +1632,28 @@ function GitScreen() {
                     </div>
                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
                       ${ds ? html`<span style="font-size:0.72rem;font-family:monospace;white-space:nowrap;"><span style="color:#198754;">+${ds.added}</span><span class="text-muted mx-1">/</span><span style="color:#dc3545;">-${ds.removed}</span></span>` : ''}
+                      <button class="btn btn-sm btn-outline-primary" style="font-size:0.75rem;padding:0.15rem 0.5rem;"
+                              onclick=${() => showFileDiff(f, false)} disabled=${busy || diffLoading}>
+                        ${selectedDiff?.path === f.path && !selectedDiff.staged ? 'Hide Diff' : 'Diff'}
+                      </button>
                       <button class="btn btn-sm btn-outline-success" style="font-size:0.75rem;padding:0.15rem 0.5rem;" onclick=${() => stageFile(f.path)} disabled=${busy}>Stage</button>
                     </div>
                   </li>
                 `})}
               </ul>
             ` : ''}
+          </div>
+        ` : ''}
+
+        ${selectedDiff ? html`
+          <div class="card shadow-sm mb-3">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+              <strong>${selectedDiff.staged ? 'Staged' : 'Unstaged'} Diff: <span class="font-monospace">${selectedDiff.path}</span></strong>
+              <button class="btn-close" aria-label="Close diff" onclick=${() => { setSelectedDiff(null); setDiffText(''); }}></button>
+            </div>
+            <div class="card-body p-0">
+              <pre class="bg-dark text-light p-3 m-0" style="max-height:500px;overflow:auto;font-size:0.8rem;white-space:pre;">${diffLoading ? 'Loading diff…' : diffText}</pre>
+            </div>
           </div>
         ` : ''}
 
@@ -2538,9 +2593,6 @@ function App() {
     dirwatcher: () => null,
     http: () => html`<${HttpScreen} />`,
     git: () => null,
-    ollama: () => html`<${OllamaScreen} />`,
-    lmstudio: () => html`<${LLMScreen} provider="lmstudio" />`,
-    'api-keys': () => html`<${ApiKeysScreen} />`,
     'not-found': () => html`
       <div class="text-center mt-5">
         <h1>404 - Not Found</h1>
@@ -2584,18 +2636,6 @@ function App() {
               <li class="nav-item">
                 <a class="nav-link ${route.name === 'git' ? 'active fw-bold' : ''}" 
                    href="#" onclick=${(e) => { e.preventDefault(); navigate('git'); }}>Git</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link ${route.name === 'ollama' ? 'active fw-bold' : ''}" 
-                   href="#" onclick=${(e) => { e.preventDefault(); navigate('ollama'); }}>Ollama</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link ${route.name === 'lmstudio' ? 'active fw-bold' : ''}" 
-                   href="#" onclick=${(e) => { e.preventDefault(); navigate('lmstudio'); }}>LM Studio</a>
-              </li>
-              <li class="nav-item">
-                <a class="nav-link ${route.name === 'api-keys' ? 'active fw-bold' : ''}" 
-                   href="#" onclick=${(e) => { e.preventDefault(); navigate('api-keys'); }}>API Keys</a>
               </li>
             </ul>
             
