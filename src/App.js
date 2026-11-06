@@ -1478,63 +1478,6 @@ function GitScreen() {
           ` : ''}
         </div>
 
-        <!-- Git remotes -->
-        <div class="card shadow-sm mb-3">
-          <div class="card-header bg-light"><strong>Origins / Remotes</strong></div>
-          <div class="card-body border-bottom">
-            <div class="row g-2">
-              <div class="col-md-3">
-                <input type="text" class="form-control" placeholder="Remote name (e.g. origin)"
-                       value=${newRemoteName} oninput=${e => setNewRemoteName(e.target.value)} />
-              </div>
-              <div class="col">
-                <input type="text" class="form-control" placeholder="Remote URL"
-                       value=${newRemoteUrl} oninput=${e => setNewRemoteUrl(e.target.value)}
-                       onkeydown=${e => { if (e.key === 'Enter') addRemote(); }} />
-              </div>
-              <div class="col-auto">
-                <button class="btn btn-outline-primary" onclick=${addRemote}
-                        disabled=${busy || !newRemoteName.trim() || !newRemoteUrl.trim()}>
-                  + Add Remote
-                </button>
-              </div>
-            </div>
-          </div>
-          ${remotes.length === 0
-        ? html`<div class="list-group-item text-muted">No remotes configured.</div>`
-        : html`<ul class="list-group list-group-flush">
-              ${remotes.map(remote => html`
-                <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2" key=${remote.name}>
-                  ${editingRemote?.name === remote.name ? html`
-                    <div class="input-group">
-                      <span class="input-group-text font-monospace">${remote.name}</span>
-                      <input type="text" class="form-control" aria-label="Remote URL"
-                             value=${editingRemote.url}
-                             oninput=${e => setEditingRemote({ ...editingRemote, url: e.target.value })}
-                             onkeydown=${e => { if (e.key === 'Enter') updateRemote(remote.name, editingRemote.url); }} />
-                      <button class="btn btn-outline-success" onclick=${() => updateRemote(remote.name, editingRemote.url)}
-                              disabled=${busy || !editingRemote.url.trim()}>Save</button>
-                      <button class="btn btn-outline-secondary" onclick=${() => setEditingRemote(null)} disabled=${busy}>Cancel</button>
-                    </div>
-                  ` : html`
-                    <div class="text-truncate flex-grow-1" style="min-width:0;">
-                      <strong class="font-monospace me-2">${remote.name}</strong>
-                      <span class="text-muted font-monospace small text-break">${remote.url}</span>
-                    </div>
-                    <div class="d-flex gap-2">
-                      <button class="btn btn-sm btn-outline-secondary"
-                              onclick=${() => setEditingRemote({ name: remote.name, url: remote.url })}
-                              disabled=${busy}>Edit</button>
-                      <button class="btn btn-sm btn-outline-danger" onclick=${() => deleteRemote(remote.name)}
-                              disabled=${busy}>Delete</button>
-                    </div>
-                  `}
-                </li>
-              `)}
-            </ul>`
-      }
-        </div>
-
         <!-- Branches card -->
         <div class="card shadow-sm mb-3">
           <div class="card-header bg-light d-flex justify-content-between align-items-center">
@@ -1748,6 +1691,63 @@ function GitScreen() {
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Git remotes -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header bg-light"><strong>Origins / Remotes</strong></div>
+          <div class="card-body border-bottom">
+            <div class="row g-2">
+              <div class="col-md-3">
+                <input type="text" class="form-control" placeholder="Remote name (e.g. origin)"
+                       value=${newRemoteName} oninput=${e => setNewRemoteName(e.target.value)} />
+              </div>
+              <div class="col">
+                <input type="text" class="form-control" placeholder="Remote URL"
+                       value=${newRemoteUrl} oninput=${e => setNewRemoteUrl(e.target.value)}
+                       onkeydown=${e => { if (e.key === 'Enter') addRemote(); }} />
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-outline-primary" onclick=${addRemote}
+                        disabled=${busy || !newRemoteName.trim() || !newRemoteUrl.trim()}>
+                  + Add Remote
+                </button>
+              </div>
+            </div>
+          </div>
+          ${remotes.length === 0
+        ? html`<div class="list-group-item text-muted">No remotes configured.</div>`
+        : html`<ul class="list-group list-group-flush">
+              ${remotes.map(remote => html`
+                <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2" key=${remote.name}>
+                  ${editingRemote?.name === remote.name ? html`
+                    <div class="input-group">
+                      <span class="input-group-text font-monospace">${remote.name}</span>
+                      <input type="text" class="form-control" aria-label="Remote URL"
+                             value=${editingRemote.url}
+                             oninput=${e => setEditingRemote({ ...editingRemote, url: e.target.value })}
+                             onkeydown=${e => { if (e.key === 'Enter') updateRemote(remote.name, editingRemote.url); }} />
+                      <button class="btn btn-outline-success" onclick=${() => updateRemote(remote.name, editingRemote.url)}
+                              disabled=${busy || !editingRemote.url.trim()}>Save</button>
+                      <button class="btn btn-outline-secondary" onclick=${() => setEditingRemote(null)} disabled=${busy}>Cancel</button>
+                    </div>
+                  ` : html`
+                    <div class="text-truncate flex-grow-1" style="min-width:0;">
+                      <strong class="font-monospace me-2">${remote.name}</strong>
+                      <span class="text-muted font-monospace small text-break">${remote.url}</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-outline-secondary"
+                              onclick=${() => setEditingRemote({ name: remote.name, url: remote.url })}
+                              disabled=${busy}>Edit</button>
+                      <button class="btn btn-sm btn-outline-danger" onclick=${() => deleteRemote(remote.name)}
+                              disabled=${busy}>Delete</button>
+                    </div>
+                  `}
+                </li>
+              `)}
+            </ul>`
+      }
         </div>
       ` : html`<p class="text-muted">No folder selected.</p>`}
     </div>
