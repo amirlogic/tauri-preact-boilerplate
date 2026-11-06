@@ -1,5 +1,5 @@
 const { h } = window.preact;
-const { useState, useEffect } = window.preactHooks;
+const { useState, useEffect, useRef } = window.preactHooks;
 const html = window.htm.bind(h);
 import { useHashRoute } from './router.js';
 
@@ -925,6 +925,11 @@ function GitScreen() {
   const [credHelperLocal, setCredHelperLocal] = useState('');
   const [credHelperGlobal, setCredHelperGlobal] = useState('');
   const [diffStats, setDiffStats] = useState({});    // { [path]: { added: number, removed: number } }
+  const [remotes, setRemotes] = useState([]);
+  const [newRemoteName, setNewRemoteName] = useState('');
+  const [newRemoteUrl, setNewRemoteUrl] = useState('');
+  const [editingRemote, setEditingRemote] = useState(null);
+  const refreshInProgress = useRef(false);
 
   // ── helpers ────────────────────────────────────────────────────────
   function clearActionResult() { setActionResult(null); }
@@ -1021,9 +1026,10 @@ function GitScreen() {
   }
 
   // ── core refresh ───────────────────────────────────────────────────
-  async function runGitCommands(cwd) {
-    setLoading(true);
-    setError(null);
+  async function runGitCommands(cwd, quiet = false) {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    if (!quiet) setLoading(true);
     try {
       // Branch
       const branchOut = await gitExec(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
@@ -1052,6 +1058,15 @@ function GitScreen() {
       // All branches
       const branchListOut = await gitExec(['branch', '-a'], cwd);
       setBranches(parseBranches(branchListOut));
+
+      // Remotes
+      const remoteOut = await gitExec(['remote', '-v'], cwd);
+      const parsedRemotes = new Map();
+      remoteOut.split('\n').forEach(line => {
+        const match = line.match(/^([^\t]+)\t(.+)\s+\(fetch\)$/);
+        if (match) parsedRemotes.set(match[1], match[2]);
+      });
+      setRemotes(Array.from(parsedRemotes, ([name, url]) => ({ name, url })));
 
       // Stashes
       try {
@@ -1092,18 +1107,22 @@ function GitScreen() {
       } catch {
         setCredHelperGlobal('');
       }
+      setError(null);
     } catch (err) {
       setError(err.toString());
       setBranch(null);
       setGitStatus(null);
       setFiles([]);
+      setBranches([]);
+      setRemotes([]);
       setStashes([]);
       setLastCommit(null);
       setCredHelperLocal('');
       setCredHelperGlobal('');
       setDiffStats({});
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
+      refreshInProgress.current = false;
     }
   }
 
@@ -1118,6 +1137,7 @@ function GitScreen() {
         setGitStatus(null);
         setFiles([]);
         setBranches([]);
+        setRemotes([]);
         setError(null);
         setActionResult(null);
         setCommitMsg('');
@@ -1127,6 +1147,9 @@ function GitScreen() {
         setCredHelperLocal('');
         setCredHelperGlobal('');
         setDiffStats({});
+        setNewRemoteName('');
+        setNewRemoteUrl('');
+        setEditingRemote(null);
         await runGitCommands(selected);
       }
     } catch (err) {
@@ -1135,59 +1158,73 @@ function GitScreen() {
   }
 
   useEffect(() => {
-    let unlisten;
-    let active = true;
-
-    async function setupWatcher() {
-      if (!dirPath) return;
-
-      try {
-        const { watch } = window.__TAURI__.fs || {};
-        if (!watch) return;
-
-        const unsubscribe = await watch(dirPath, (event) => {
-          console.log('Git watch event received:', event);
-          if (!active || !dirPath) return;
-
-          const changedPaths = Array.isArray(event?.paths) ? event.paths : [];
-          const shouldRefresh = changedPaths.every((p) => {
-            const normalized = String(p).replace(/\\/g, '/');
-            return !normalized.includes('/.git/') && !normalized.endsWith('/.git') && !normalized.includes('\\.git\\') && !normalized.endsWith('\\.git');
-          });
-
-          if (!shouldRefresh) {
-            console.log('Skipping Git refresh for .git metadata change');
-            return;
-          }
-
-          setTimeout(() => {
-            if (active && dirPath) {
-              runGitCommands(dirPath).catch((err) => {
-                console.error('Auto-refresh failed:', err);
-              });
-            }
-          }, 200);
-        }, { recursive: true });
-
-        if (active) {
-          unlisten = unsubscribe;
-        } else {
-          unsubscribe();
-        }
-      } catch (err) {
-        console.error('Git watcher error:', err);
-      }
-    }
-
-    setupWatcher();
-
+    if (!dirPath) return undefined;
+    const intervalId = window.setInterval(() => {
+      if (!actionLoading) runGitCommands(dirPath, true);
+    }, 2500);
     return () => {
-      active = false;
-      if (typeof unlisten === 'function') {
-        unlisten();
-      }
+      window.clearInterval(intervalId);
     };
-  }, [dirPath]);
+  }, [dirPath, actionLoading]);
+
+  async function trustRepository() {
+    try {
+      setActionLoading('Adding repository to trusted directories');
+      await gitExec(['config', '--global', '--add', 'safe.directory', dirPath], dirPath);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: 'Repository added to Git trusted directories.' });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  async function addRemote() {
+    const name = newRemoteName.trim();
+    const url = newRemoteUrl.trim();
+    if (!name || !url) {
+      setActionResult({ type: 'danger', text: 'Remote name and URL are required.' });
+      return;
+    }
+    try {
+      setActionLoading(`Adding remote '${name}'`);
+      await gitExec(['remote', 'add', name, url], dirPath);
+      setNewRemoteName('');
+      setNewRemoteUrl('');
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: `Remote '${name}' added.` });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  async function updateRemote(name, url) {
+    const value = url.trim();
+    if (!value) {
+      setActionResult({ type: 'danger', text: 'Remote URL is required.' });
+      return;
+    }
+    try {
+      setActionLoading(`Updating remote '${name}'`);
+      await gitExec(['remote', 'set-url', name, value], dirPath);
+      setEditingRemote(null);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: `Remote '${name}' updated.` });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
+
+  async function deleteRemote(name) {
+    if (!window.confirm(`Delete remote '${name}'?`)) return;
+    try {
+      setActionLoading(`Deleting remote '${name}'`);
+      await gitExec(['remote', 'remove', name], dirPath);
+      await runGitCommands(dirPath);
+      setActionResult({ type: 'success', text: `Remote '${name}' deleted.` });
+    } catch (err) {
+      setActionResult({ type: 'danger', text: err.toString() });
+    } finally { setActionLoading(null); }
+  }
 
   // ── branch management ──────────────────────────────────────────────
   async function doCreateBranch() {
@@ -1406,6 +1443,13 @@ function GitScreen() {
       <!-- Alerts -->
       ${error ? html`<div class="alert alert-danger alert-dismissible">
         <strong>Error:</strong> ${error}
+        ${dirPath && /dubious ownership|safe\.directory/i.test(error) ? html`
+          <div class="mt-2">
+            <button class="btn btn-sm btn-outline-danger" onclick=${trustRepository} disabled=${busy}>
+              Add to trusted repos
+            </button>
+          </div>
+        ` : ''}
         <button type="button" class="btn-close" onclick=${() => setError(null)}></button>
       </div>` : ''}
       ${actionResult ? html`<div class="alert alert-${actionResult.type} alert-dismissible" style="white-space:pre-wrap;">
@@ -1432,6 +1476,63 @@ function GitScreen() {
               </div>
             </div>
           ` : ''}
+        </div>
+
+        <!-- Git remotes -->
+        <div class="card shadow-sm mb-3">
+          <div class="card-header bg-light"><strong>Origins / Remotes</strong></div>
+          <div class="card-body border-bottom">
+            <div class="row g-2">
+              <div class="col-md-3">
+                <input type="text" class="form-control" placeholder="Remote name (e.g. origin)"
+                       value=${newRemoteName} oninput=${e => setNewRemoteName(e.target.value)} />
+              </div>
+              <div class="col">
+                <input type="text" class="form-control" placeholder="Remote URL"
+                       value=${newRemoteUrl} oninput=${e => setNewRemoteUrl(e.target.value)}
+                       onkeydown=${e => { if (e.key === 'Enter') addRemote(); }} />
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-outline-primary" onclick=${addRemote}
+                        disabled=${busy || !newRemoteName.trim() || !newRemoteUrl.trim()}>
+                  + Add Remote
+                </button>
+              </div>
+            </div>
+          </div>
+          ${remotes.length === 0
+        ? html`<div class="list-group-item text-muted">No remotes configured.</div>`
+        : html`<ul class="list-group list-group-flush">
+              ${remotes.map(remote => html`
+                <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2" key=${remote.name}>
+                  ${editingRemote?.name === remote.name ? html`
+                    <div class="input-group">
+                      <span class="input-group-text font-monospace">${remote.name}</span>
+                      <input type="text" class="form-control" aria-label="Remote URL"
+                             value=${editingRemote.url}
+                             oninput=${e => setEditingRemote({ ...editingRemote, url: e.target.value })}
+                             onkeydown=${e => { if (e.key === 'Enter') updateRemote(remote.name, editingRemote.url); }} />
+                      <button class="btn btn-outline-success" onclick=${() => updateRemote(remote.name, editingRemote.url)}
+                              disabled=${busy || !editingRemote.url.trim()}>Save</button>
+                      <button class="btn btn-outline-secondary" onclick=${() => setEditingRemote(null)} disabled=${busy}>Cancel</button>
+                    </div>
+                  ` : html`
+                    <div class="text-truncate flex-grow-1" style="min-width:0;">
+                      <strong class="font-monospace me-2">${remote.name}</strong>
+                      <span class="text-muted font-monospace small text-break">${remote.url}</span>
+                    </div>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-outline-secondary"
+                              onclick=${() => setEditingRemote({ name: remote.name, url: remote.url })}
+                              disabled=${busy}>Edit</button>
+                      <button class="btn btn-sm btn-outline-danger" onclick=${() => deleteRemote(remote.name)}
+                              disabled=${busy}>Delete</button>
+                    </div>
+                  `}
+                </li>
+              `)}
+            </ul>`
+      }
         </div>
 
         <!-- Branches card -->
